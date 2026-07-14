@@ -1,0 +1,147 @@
+name: Aggregate
+
+# Merges the per-app OSTree repos that every rob-land app's CI uploads
+# to its rolling `continuous` GitHub release, GPG-signs the result, and
+# publishes the combined multi-app Flatpak repo to GitHub Pages:
+#
+#   flatpak remote-add --user rob-land \
+#     https://rob-land.github.io/flatpak-repo/rob-land.flatpakrepo
+#   flatpak install --user rob-land <app-id>
+#
+# Runs hourly (release downloads are anonymous, so app repos need no
+# cross-repo tokens) and on manual dispatch. App CIs can shorten the
+# latency by dispatching this workflow with a PAT — see the app
+# workflows' optional AGGREGATOR_DISPATCH_TOKEN step.
+#
+# Secrets required:
+#   FLATPAK_GPG_PRIVATE_KEY   armored `gpg --export-secret-keys --armor <KEY_ID>`
+#   FLATPAK_GPG_KEY_ID        the key id used to sign commits + summary
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: aggregate
+  cancel-in-progress: false
+
+env:
+  OWNER: rob-land
+  APPS: "vitals banter clicker homie"
+  ARCHES: "x86_64 aarch64"
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Install flatpak + ostree
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak ostree
+
+      - name: Fetch every app's continuous-release repo tars
+        run: |
+          any=0
+          for app in $APPS; do
+            for arch in $ARCHES; do
+              url="https://github.com/${OWNER}/${app}/releases/download/continuous/repo-${arch}.tar"
+              if curl -fsSL --retry 3 -o "${app}-${arch}.tar" "$url"; then
+                echo "fetched ${app} ${arch}"
+                any=1
+              else
+                rm -f "${app}-${arch}.tar"
+                echo "::warning::${app} ${arch} missing (no continuous release yet?) — skipped"
+              fi
+            done
+          done
+          [ "$any" = 1 ] || { echo "::error::no app produced a repo tar"; exit 1; }
+
+      - name: Merge everything into one OSTree repo
+        run: |
+          mkdir -p site/repo
+          ostree init --repo=site/repo --mode=archive
+          for tarball in *-*.tar; do
+            [ -e "$tarball" ] || continue
+            d="src-${tarball%.tar}"
+            mkdir "$d" && tar -xf "$tarball" -C "$d"
+            ostree pull-local --repo=site/repo "$d"
+          done
+          ostree refs --repo=site/repo
+
+      - name: Skip the deploy when no ref moved
+        id: change
+        run: |
+          state=$(while read -r ref; do
+            printf '%s %s\n' "$ref" "$(ostree rev-parse --repo=site/repo "$ref")"
+          done < <(ostree refs --repo=site/repo | sort) | sha256sum | cut -d' ' -f1)
+          live=$(curl -fsSL "https://${OWNER}.github.io/flatpak-repo/state.txt" || echo none)
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          if [ "$state" = "$live" ] && [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "no changes since the live deploy — skipping"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign every commit and the summary
+        if: steps.change.outputs.changed == 'true'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.FLATPAK_GPG_PRIVATE_KEY }}
+          GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+        run: |
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --import
+          while read -r ref; do
+            [ -z "$ref" ] && continue
+            ostree gpg-sign --repo=site/repo \
+              "$(ostree rev-parse --repo=site/repo "$ref")" "$GPG_KEY_ID"
+          done < <(ostree refs --repo=site/repo)
+          flatpak build-update-repo --gpg-sign="$GPG_KEY_ID" site/repo
+
+      - name: Write .flatpakrepo, landing page and state marker
+        if: steps.change.outputs.changed == 'true'
+        env:
+          GPG_KEY_ID: ${{ secrets.FLATPAK_GPG_KEY_ID }}
+          STATE: ${{ steps.change.outputs.state }}
+        run: |
+          base_url="https://${OWNER}.github.io/flatpak-repo"
+          printf '%s' "$STATE" > site/state.txt
+          cat > site/rob-land.flatpakrepo <<EOF
+          [Flatpak Repo]
+          Title=Rob Land Apps
+          Url=${base_url}/repo/
+          Homepage=https://github.com/${OWNER}
+          Comment=Personal Flatpak repo for rob-land's mobile Linux apps
+          Description=GTK4/libadwaita apps built for x86_64 and aarch64 by GitHub Actions
+          GPGKey=$(gpg --export "$GPG_KEY_ID" | base64 -w0)
+          EOF
+          {
+            echo '<!doctype html><meta charset="utf-8"><title>Rob Land Flatpak repo</title><pre>'
+            echo "flatpak remote-add --user rob-land ${base_url}/rob-land.flatpakrepo"
+            echo
+            echo "# then any of:"
+            while read -r app; do
+              echo "flatpak install --user rob-land ${app}"
+            done < <(ostree refs --repo=site/repo | grep '^app/' \
+                       | cut -d/ -f2 | sort -u)
+            echo '</pre>'
+          } > site/index.html
+
+      - uses: actions/configure-pages@v6
+        if: steps.change.outputs.changed == 'true'
+
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.change.outputs.changed == 'true'
+        with:
+          path: site
+
+      - id: deployment
+        if: steps.change.outputs.changed == 'true'
+        uses: actions/deploy-pages@v5
