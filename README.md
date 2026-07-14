@@ -12,10 +12,11 @@ flatpak install --user rob-land land.rob.vitals   # or any other app
 
 ## How it works
 
-Each app repo ([vitals], [banter], [clicker], [homie]) builds natively
-for both arches in its own GitHub Actions workflow and uploads the
-per-arch OSTree repo tars (plus direct-install `.flatpak` bundles) to
-its rolling `continuous` release.
+Each app repo ([vitals], [banter], [clicker], [homie], [coffer],
+[jamjar], [keepsake], [patch], [roster], [shoebox], [stacks]) builds
+natively for both arches in its own GitHub Actions workflow and
+uploads the per-arch OSTree repo tars (plus direct-install `.flatpak`
+bundles) to its rolling `continuous` release.
 
 The [aggregate workflow](.github/workflows/aggregate.yml) here runs
 hourly (and on manual dispatch): it downloads those release tars
@@ -28,3 +29,10 @@ no app ref moved since the live site.
 [banter]: https://github.com/rob-land/banter
 [clicker]: https://github.com/rob-land/clicker
 [homie]: https://github.com/rob-land/homie
+[coffer]: https://github.com/rob-land/coffer
+[jamjar]: https://github.com/rob-land/jamjar
+[keepsake]: https://github.com/rob-land/keepsake
+[patch]: https://github.com/rob-land/patch
+[roster]: https://github.com/rob-land/roster
+[shoebox]: https://github.com/rob-land/shoebox
+[stacks]: https://github.com/rob-land/stacks
