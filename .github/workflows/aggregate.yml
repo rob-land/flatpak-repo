@@ -28,7 +28,7 @@ concurrency:
 
 env:
   OWNER: rob-land
-  APPS: "vitals banter clicker homie coffer jamjar keepsake patch roster shoebox stacks almanac nectar flowfree"
+  APPS: "vitals banter clicker homie coffer jamjar keepsake patch roster shoebox stacks almanac nectar flow"
   ARCHES: "x86_64 aarch64"
 
 jobs:
