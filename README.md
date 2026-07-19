@@ -14,7 +14,7 @@ flatpak install --user rob-land land.rob.vitals   # or any other app
 
 Each app repo ([vitals], [banter], [clicker], [homie], [coffer],
 [jamjar], [keepsake], [patch], [roster], [shoebox], [stacks],
-[nectar]) builds
+[nectar], [flow]) builds
 natively for both arches in its own GitHub Actions workflow and
 uploads the per-arch OSTree repo tars (plus direct-install `.flatpak`
 bundles) to its rolling `continuous` release.
@@ -38,3 +38,4 @@ no app ref moved since the live site.
 [shoebox]: https://github.com/rob-land/shoebox
 [stacks]: https://github.com/rob-land/stacks
 [nectar]: https://github.com/rob-land/nectar
+[flow]: https://github.com/rob-land/flow
