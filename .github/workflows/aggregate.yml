@@ -22,9 +22,25 @@ on:
     - cron: "17 * * * *"
   workflow_dispatch:
 
+# Newest run wins. GitHub's Pages starter workflow recommends
+# `cancel-in-progress: false` so a production deploy is never
+# interrupted — that's the right default for a slow, expensive deploy,
+# but it's the wrong trade here and it bit us on 2026-08-06: a run
+# wedged in `waiting` at the github-pages environment gate held this
+# group for ~46 h, and because only one run may queue behind the
+# in-flight one, all 25 hourly runs after it were cancelled. Publishing
+# stopped for two days with no failure notification, because a
+# cancelled run doesn't send one.
+#
+# Superseding is cheap here in a way it isn't for a typical deploy:
+# this job is fully idempotent (it refetches every app tar and rebuilds
+# the OSTree repo from scratch) and finishes in about a minute against
+# an hourly schedule, so an interrupted run costs one skipped cycle and
+# the next one republishes everything. A stuck run now clears itself
+# within the hour instead of blocking indefinitely.
 concurrency:
   group: aggregate
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   OWNER: rob-land
@@ -34,6 +50,13 @@ env:
 jobs:
   aggregate:
     runs-on: ubuntu-24.04
+    # Runs take about a minute; 20 is headroom, not a target. This
+    # guards a hung *step* — the fetch loop alone makes ~50 curls
+    # against the releases CDN — and deliberately not the gate stall
+    # above, which timeout-minutes cannot help with: the clock only
+    # starts once a job is executing on a runner, and a job held at an
+    # environment gate never gets that far (those expire after 30 days).
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: write
